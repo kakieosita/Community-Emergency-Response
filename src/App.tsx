@@ -6,7 +6,7 @@ import AnalyticsView from './components/AnalyticsView';
 import { 
   ShieldAlert, Activity, User as UserIcon, LogOut, Map, 
   MapPin, Clipboard, PlusCircle, Users, BarChart3, 
-  Clock, AlertCircle, CheckCircle, Send, Plus
+  Clock, AlertCircle, CheckCircle, Send, Plus, Download
 } from 'lucide-react';
 
 export default function App() {
@@ -265,6 +265,80 @@ export default function App() {
       await loadRegistryData();
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to delegate responder');
+    }
+  };
+
+  // Export current incidents list to CSV
+  const handleExportCSV = () => {
+    if (incidents.length === 0) {
+      setErrorMessage('No incident records available to export.');
+      return;
+    }
+
+    // Define standard headers
+    const headers = [
+      'Incident ID',
+      'Title',
+      'Type',
+      'Severity',
+      'Status',
+      'Impact (Affected People)',
+      'Latitude',
+      'Longitude',
+      'Address',
+      'Citizen Reporter',
+      'Assigned Responder',
+      'Notes & Logs',
+      'Created At',
+      'Updated At'
+    ];
+
+    const escapeCSVCell = (val: any) => {
+      if (val === undefined || val === null) return '';
+      let str = String(val);
+      // Escape inner quotes
+      str = str.replace(/"/g, '""');
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return `"${str}"`;
+      }
+      return str;
+    };
+
+    const rows = incidents.map((inc) => [
+      inc.id,
+      inc.title,
+      inc.type,
+      inc.severity,
+      inc.status,
+      inc.peopleAffected,
+      inc.location?.lat ?? '',
+      inc.location?.lng ?? '',
+      inc.location?.address ?? '',
+      inc.citizenName,
+      inc.assignedResponderName || 'Unassigned',
+      inc.responseNotes || '',
+      inc.createdAt,
+      inc.updatedAt
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map((row) => row.map(escapeCSVCell).join(','))
+    ].join('\r\n');
+
+    try {
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `SF_Municipal_Incidents_Report_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setSuccessMessage('Incident report database exported to CSV successfully!');
+    } catch (err: any) {
+      setErrorMessage('Failed to trigger CSV file download.');
     }
   };
 
@@ -890,7 +964,18 @@ export default function App() {
                     <h3 className="text-base font-bold text-slate-950">👮 Municipal Incident Dispatch Control Center</h3>
                     <p className="text-slate-500 text-xs mt-0.5">Oversee, assign responder marshals, review predictions feedback and handle cleanup logs.</p>
                   </div>
-                  <span className="bg-slate-100 border border-slate-200 text-slate-700 text-[10px] px-3.5 py-1.5 rounded-full font-mono font-bold shadow-sm">Auto Dispatching System</span>
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      onClick={handleExportCSV}
+                      className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition cursor-pointer shadow-sm hover:shadow-md active:scale-95"
+                      id="btn-export-csv"
+                      title="Export current database records to a comma-separated values report file"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Export CSV
+                    </button>
+                    <span className="bg-slate-100 border border-slate-200 text-slate-700 text-[10px] px-3.5 py-1.5 rounded-full font-mono font-bold shadow-sm">Auto Dispatching System</span>
+                  </div>
                 </div>
 
                 <div className="space-y-3.5">

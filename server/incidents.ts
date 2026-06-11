@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
-import { getIncidents, addIncident, updateIncident, getUsers } from './db';
+import { getIncidents, addIncident, updateIncident, getUsers, deleteIncident } from './db';
 import { authMiddleware, AuthenticatedRequest } from './auth';
 import { Incident, IncidentType, IncidentSeverity, IncidentStatus, DashboardStats, LocationCoordinates } from '../src/types';
 
@@ -155,10 +155,10 @@ Your response must be returned strictly in JSON format matching the schema rules
 
 export function setupIncidentRoutes(app: any) {
   // Get all incidents
-  app.get('/api/incidents', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  app.get('/api/incidents', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { status, type, severity } = req.query;
-      let list = getIncidents();
+      let list = await getIncidents();
 
       // Role filter
       if (req.user?.role === 'citizen') {
@@ -183,10 +183,10 @@ export function setupIncidentRoutes(app: any) {
   });
 
   // Get single incident
-  app.get('/api/incidents/:id', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  app.get('/api/incidents/:id', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { id } = req.params;
-      const list = getIncidents();
+      const list = await getIncidents();
       const incident = list.find((inc) => inc.id === id);
 
       if (!incident) {
@@ -241,7 +241,7 @@ export function setupIncidentRoutes(app: any) {
         updatedAt: new Date().toISOString(),
       };
 
-      addIncident(newIncident);
+      await addIncident(newIncident);
       res.status(210).json(newIncident);
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to submit incident report' });
@@ -249,7 +249,7 @@ export function setupIncidentRoutes(app: any) {
   });
 
   // Assign responder to incident (Admin only)
-  app.post('/api/incidents/:id/assign', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  app.post('/api/incidents/:id/assign', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       if (req.user?.role !== 'admin') {
         res.status(403).json({ error: 'Forbidden: Admin clearance required.' });
@@ -264,14 +264,14 @@ export function setupIncidentRoutes(app: any) {
         return;
       }
 
-      const users = getUsers();
+      const users = await getUsers();
       const responder = users.find((u) => u.id === responderId && u.role === 'responder');
       if (!responder) {
         res.status(400).json({ error: 'Invalid responder selected' });
         return;
       }
 
-      const incidents = getIncidents();
+      const incidents = await getIncidents();
       const incident = incidents.find((inc) => inc.id === id);
       if (!incident) {
         res.status(404).json({ error: 'Incident not found' });
@@ -283,7 +283,7 @@ export function setupIncidentRoutes(app: any) {
       incident.status = 'dispatching';
       incident.updatedAt = new Date().toISOString();
 
-      if (updateIncident(incident)) {
+      if (await updateIncident(incident)) {
         res.json(incident);
       } else {
         res.status(500).json({ error: 'Failed to update incident record' });
@@ -294,7 +294,7 @@ export function setupIncidentRoutes(app: any) {
   });
 
   // Update incident status (Responder / Admin)
-  app.post('/api/incidents/:id/status', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  app.post('/api/incidents/:id/status', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       if (req.user?.role !== 'admin' && req.user?.role !== 'responder') {
         res.status(403).json({ error: 'Forbidden: Responder or Admin privilege level required.' });
@@ -310,7 +310,7 @@ export function setupIncidentRoutes(app: any) {
         return;
       }
 
-      const incidents = getIncidents();
+      const incidents = await getIncidents();
       const incident = incidents.find((inc) => inc.id === id);
       if (!incident) {
         res.status(404).json({ error: 'Incident not found' });
@@ -332,7 +332,7 @@ export function setupIncidentRoutes(app: any) {
       incident.status = status;
       incident.updatedAt = new Date().toISOString();
 
-      if (updateIncident(incident)) {
+      if (await updateIncident(incident)) {
         res.json(incident);
       } else {
         res.status(500).json({ error: 'Failed to update status' });
@@ -343,7 +343,7 @@ export function setupIncidentRoutes(app: any) {
   });
 
   // Add response notes (Responder or Admin)
-  app.post('/api/incidents/:id/notes', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  app.post('/api/incidents/:id/notes', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       if (req.user?.role !== 'admin' && req.user?.role !== 'responder') {
         res.status(403).json({ error: 'Forbidden: Responder or Admin privilege required.' });
@@ -358,7 +358,7 @@ export function setupIncidentRoutes(app: any) {
         return;
       }
 
-      const incidents = getIncidents();
+      const incidents = await getIncidents();
       const incident = incidents.find((inc) => inc.id === id);
       if (!incident) {
         res.status(404).json({ error: 'Incident not found' });
@@ -374,7 +374,7 @@ export function setupIncidentRoutes(app: any) {
       incident.responseNotes = notes;
       incident.updatedAt = new Date().toISOString();
 
-      if (updateIncident(incident)) {
+      if (await updateIncident(incident)) {
         res.json(incident);
       } else {
         res.status(500).json({ error: 'Failed to add response log details' });
@@ -385,7 +385,7 @@ export function setupIncidentRoutes(app: any) {
   });
 
   // Delete incident (Admin only)
-  app.delete('/api/incidents/:id', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  app.delete('/api/incidents/:id', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       if (req.user?.role !== 'admin') {
         res.status(403).json({ error: 'Forbidden: Admin clearance required.' });
@@ -393,16 +393,11 @@ export function setupIncidentRoutes(app: any) {
       }
 
       const { id } = req.params;
-      const incidents = getIncidents();
-      const idx = incidents.findIndex((inc) => inc.id === id);
-      if (idx === -1) {
+      const deleted = await deleteIncident(id);
+      if (!deleted) {
         res.status(404).json({ error: 'Incident not found' });
         return;
       }
-
-      incidents.splice(idx, 1);
-      const { initDb, saveDb } = require('./db');
-      saveDb();
 
       res.json({ message: 'Incident removed successfully from primary databases' });
     } catch (err: any) {
@@ -411,9 +406,9 @@ export function setupIncidentRoutes(app: any) {
   });
 
   // Get Analytics Dashboard summary metadata
-  app.get('/api/analytics', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  app.get('/api/analytics', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const incidents = getIncidents();
+      const incidents = await getIncidents();
 
       const totalIncidents = incidents.length;
       const resolvedCount = incidents.filter((i) => i.status === 'resolved').length;

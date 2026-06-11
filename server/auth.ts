@@ -35,7 +35,7 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
 
 export function setupAuthRoutes(app: any) {
   // Register citizen
-  app.post('/api/auth/register', (req: Request, res: Response) => {
+  app.post('/api/auth/register', async (req: Request, res: Response) => {
     try {
       const { name, email, password, role, badgeNumber } = req.body;
 
@@ -44,7 +44,7 @@ export function setupAuthRoutes(app: any) {
         return;
       }
 
-      const users = getUsers();
+      const users = await getUsers();
       if (users.some((u) => u.email.toLowerCase() === email.toLowerCase())) {
         res.status(400).json({ error: 'A user with this email address already exists' });
         return;
@@ -63,7 +63,7 @@ export function setupAuthRoutes(app: any) {
         passwordHash,
       };
 
-      addUser(newUser);
+      await addUser(newUser);
 
       // Create JWT token
       const token = jwt.sign(
@@ -89,7 +89,7 @@ export function setupAuthRoutes(app: any) {
   });
 
   // Login
-  app.post('/api/auth/login', (req: Request, res: Response) => {
+  app.post('/api/auth/login', async (req: Request, res: Response) => {
     try {
       const { email, password } = req.body;
 
@@ -98,7 +98,7 @@ export function setupAuthRoutes(app: any) {
         return;
       }
 
-      const users = getUsers();
+      const users = await getUsers();
       const user = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
 
       if (!user || !bcrypt.compareSync(password, user.passwordHash)) {
@@ -129,8 +129,8 @@ export function setupAuthRoutes(app: any) {
   });
 
   // Get current user profile
-  app.get('/api/auth/me', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
-    const users = getUsers();
+  app.get('/api/auth/me', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    const users = await getUsers();
     const userRecord = users.find((u) => u.id === req.user?.id);
     if (!userRecord) {
       res.status(404).json({ error: 'User profile not found' });
@@ -142,24 +142,26 @@ export function setupAuthRoutes(app: any) {
   });
 
   // Admin: Get all responders
-  app.get('/api/responders', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  app.get('/api/responders', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     if (req.user?.role !== 'admin') {
       res.status(403).json({ error: 'Forbidden: Admin clearance required' });
       return;
     }
-    const responders = getUsers()
+    const allUsers = await getUsers();
+    const responders = allUsers
       .filter((u) => u.role === 'responder')
       .map(({ passwordHash, ...user }) => user);
     res.json(responders);
   });
 
   // Admin: Get all citizens
-  app.get('/api/citizens', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  app.get('/api/citizens', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     if (req.user?.role !== 'admin') {
       res.status(403).json({ error: 'Forbidden: Admin clearance required' });
       return;
     }
-    const citizens = getUsers()
+    const allUsers = await getUsers();
+    const citizens = allUsers
       .filter((u) => u.role === 'citizen')
       .map(({ passwordHash, ...user }) => user);
     res.json(citizens);

@@ -1,20 +1,72 @@
+import mongoose, { Schema as MongooseSchema, Model } from 'mongoose';
 import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
-import { User, Incident, IncidentType, IncidentSeverity, IncidentStatus } from '../src/types';
+import { User, Incident } from '../src/types';
 
 const DB_FILE = path.join(process.cwd(), 'server-db.json');
+
+export interface UserRecord extends User {
+  passwordHash: string;
+}
 
 interface Schema {
   users: UserRecord[];
   incidents: Incident[];
 }
 
-interface UserRecord extends User {
-  passwordHash: string;
-}
-
 let dbCache: Schema = { users: [], incidents: [] };
+let isMongoConnected = false;
+
+// ---------------------------------------------------------
+// User Mongoose Schema
+// ---------------------------------------------------------
+const UserSchema = new MongooseSchema<UserRecord>({
+  id: { type: String, required: true, unique: true },
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true, lowercase: true },
+  role: { type: String, required: true },
+  badgeNumber: { type: String },
+  passwordHash: { type: String, required: true },
+  createdAt: { type: String, required: true }
+});
+
+// ---------------------------------------------------------
+// Incident Mongoose Schema
+// ---------------------------------------------------------
+const IncidentSchema = new MongooseSchema<Incident>({
+  id: { type: String, required: true, unique: true },
+  title: { type: String, required: true },
+  type: { type: String, required: true },
+  description: { type: String, required: true },
+  peopleAffected: { type: Number, required: true },
+  imageUrl: { type: String },
+  location: {
+    lat: { type: Number, required: true },
+    lng: { type: Number, required: true },
+    address: { type: String }
+  },
+  status: { type: String, required: true },
+  severity: { type: String, required: true },
+  citizenId: { type: String, required: true },
+  citizenName: { type: String, required: true },
+  assignedResponderId: { type: String },
+  assignedResponderName: { type: String },
+  responseNotes: { type: String },
+  createdAt: { type: String, required: true },
+  updatedAt: { type: String, required: true }
+}, { timestamps: false });
+
+export let UserModel: Model<UserRecord>;
+export let IncidentModel: Model<Incident>;
+
+try {
+  UserModel = mongoose.model<UserRecord>('User', UserSchema);
+  IncidentModel = mongoose.model<Incident>('Incident', IncidentSchema);
+} catch {
+  UserModel = mongoose.model<UserRecord>('User');
+  IncidentModel = mongoose.model<Incident>('Incident');
+}
 
 // Default initial seed data
 const SEED_USERS: UserRecord[] = [
@@ -176,12 +228,11 @@ const SEED_INCIDENTS: Incident[] = [
   },
 ];
 
-export function initDb() {
+function initFileDb() {
   try {
     if (fs.existsSync(DB_FILE)) {
       const content = fs.readFileSync(DB_FILE, 'utf-8');
       dbCache = JSON.parse(content);
-      // Validate structure
       if (!dbCache.users) dbCache.users = [];
       if (!dbCache.incidents) dbCache.incidents = [];
     } else {
@@ -189,33 +240,105 @@ export function initDb() {
       saveDb();
     }
   } catch (error) {
-    console.error('Error initializing database file. Using in-memory fallback:', error);
+    console.error('Error initializing file-based database. Using in-memory fallback:', error);
     dbCache = { users: SEED_USERS, incidents: SEED_INCIDENTS };
   }
 }
 
 export function saveDb() {
+  if (isMongoConnected) return; // Managed by MongoDB, file save skipped.
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(dbCache, null, 2), 'utf-8');
   } catch (err) {
-    console.error('Error saving to database file:', err);
+    console.error('Error saving to file-based database:', err);
   }
 }
 
-export function getUsers(): UserRecord[] {
+export async function initDb() {
+  const uri = process.env.MONGODB_URI;
+  if (uri && uri !== 'MY_MONGODB_URI' && uri.trim() !== '') {
+    try {
+      console.log('Connecting to MongoDB Database...');
+      await mongoose.connect(uri, {
+        serverSelectionTimeoutMS: 5000,
+      });
+      isMongoConnected = true;
+      console.log('Successfully connected to MongoDB Database.');
+
+      // Check schemas are seeded
+      const userCount = await UserModel.countDocuments();
+      if (userCount === 0) {
+        console.log('Seeding MongoDB with initial users...');
+        await UserModel.insertMany(SEED_USERS);
+      }
+
+      const incidentCount = await IncidentModel.countDocuments();
+      if (incidentCount === 0) {
+        console.log('Seeding MongoDB with initial incidents...');
+        await IncidentModel.insertMany(SEED_INCIDENTS);
+      }
+    } catch (err) {
+      console.error('Failed to connect to MongoDB. Falling back to local file database.', err);
+      isMongoConnected = false;
+      initFileDb();
+    }
+  } else {
+    console.log('No MONGODB_URI configured. Booting in file-based fallback sandbox mode.');
+    isMongoConnected = false;
+    initFileDb();
+  }
+}
+
+export async function getUsers(): Promise<UserRecord[]> {
+  if (isMongoConnected) {
+    try {
+      const docs = await UserModel.find().lean();
+      return docs as unknown as UserRecord[];
+    } catch (err) {
+      console.error('MongoDB query error in getUsers, falling back to cache:', err);
+    }
+  }
   return dbCache.users;
 }
 
-export function getIncidents(): Incident[] {
+export async function getIncidents(): Promise<Incident[]> {
+  if (isMongoConnected) {
+    try {
+      const docs = await IncidentModel.find().sort({ createdAt: -1 }).lean();
+      return docs as unknown as Incident[];
+    } catch (err) {
+      console.error('MongoDB query error in getIncidents, falling back to cache:', err);
+    }
+  }
   return dbCache.incidents;
 }
 
-export function addIncident(incident: Incident) {
+export async function addIncident(incident: Incident): Promise<void> {
+  if (isMongoConnected) {
+    try {
+      const newInc = new IncidentModel(incident);
+      await newInc.save();
+      return;
+    } catch (err) {
+      console.error('MongoDB add error in addIncident, falling back to cache:', err);
+    }
+  }
   dbCache.incidents.unshift(incident);
   saveDb();
 }
 
-export function updateIncident(updated: Incident) {
+export async function updateIncident(updated: Incident): Promise<boolean> {
+  if (isMongoConnected) {
+    try {
+      const res = await IncidentModel.updateOne(
+        { id: updated.id },
+        { $set: { ...updated, updatedAt: new Date().toISOString() } }
+      );
+      return res.modifiedCount > 0 || res.matchedCount > 0;
+    } catch (err) {
+      console.error('MongoDB update error in updateIncident, falling back to cache:', err);
+    }
+  }
   const index = dbCache.incidents.findIndex((inc) => inc.id === updated.id);
   if (index !== -1) {
     dbCache.incidents[index] = { ...updated, updatedAt: new Date().toISOString() };
@@ -225,7 +348,34 @@ export function updateIncident(updated: Incident) {
   return false;
 }
 
-export function addUser(user: UserRecord) {
+export async function addUser(user: UserRecord): Promise<void> {
+  if (isMongoConnected) {
+    try {
+      const newUser = new UserModel(user);
+      await newUser.save();
+      return;
+    } catch (err) {
+      console.error('MongoDB insert error in addUser, falling back to cache:', err);
+    }
+  }
   dbCache.users.push(user);
   saveDb();
+}
+
+export async function deleteIncident(id: string): Promise<boolean> {
+  if (isMongoConnected) {
+    try {
+      const res = await IncidentModel.deleteOne({ id });
+      return res.deletedCount > 0;
+    } catch (err) {
+      console.error('MongoDB delete error in deleteIncident:', err);
+    }
+  }
+  const idx = dbCache.incidents.findIndex((inc) => inc.id === id);
+  if (idx !== -1) {
+    dbCache.incidents.splice(idx, 1);
+    saveDb();
+    return true;
+  }
+  return false;
 }

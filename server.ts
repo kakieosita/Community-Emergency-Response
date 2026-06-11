@@ -10,8 +10,8 @@ import { setupIncidentRoutes } from './server/incidents';
 dotenv.config();
 
 async function startServer() {
-  // Initialize file-based database schema & seed values
-  initDb();
+  // Initialize database schema & seed values
+  await initDb();
 
   const app = express();
   const PORT = 3000;

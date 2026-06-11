@@ -1,0 +1,6 @@
+{
+  "name": "Community Emergency Response GIS",
+  "description": "Intelligent Community Emergency Response and Incident Reporting System with GIS-Based Location Tracking and AI-powered Incident Severity Prediction.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
